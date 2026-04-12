@@ -74,8 +74,6 @@ dbs_lab_project/
 │
 ├── sql/
 │   ├── setup.sql                # Run once after importing the dump
-│   └── fix_ratings.sql          # Run once to recalculate avg_ratings
-│
 ├── .gitignore
 └── README.md
 ```
