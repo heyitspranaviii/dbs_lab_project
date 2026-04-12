@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Manipal Eats</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="auth-page">
+
+<div class="auth-box">
+  <a href="/" class="auth-brand">Manipal Eats</a>
+  <h1>Welcome back</h1>
+  <p class="auth-sub">Log in to discover the best food in Manipal</p>
+
+  <form id="login-form" novalidate>
+    <div class="form-group">
+      <label for="login">Email or Username</label>
+      <input type="text" id="login" placeholder="e.g. rahul@learner.manipal.edu" autocomplete="username" />
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="Your password" autocomplete="current-password" />
+    </div>
+    <div id="form-error" class="form-error" style="margin-bottom:.75rem"></div>
+    <button type="submit" class="btn btn-primary" style="width:100%" id="submit-btn">Log in</button>
+  </form>
+
+  <div class="auth-footer" style="margin-top:1rem">
+    <a href="/forgot">Forgot password?</a>
+    &nbsp;·&nbsp;
+    Don't have an account? <a href="/signup">Sign up</a>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/utils.js"></script>
+<script>
+  /* Already logged in → go home */
+  if (Auth.isLoggedIn()) window.location.href = '/';
+
+  document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const errEl = document.getElementById('form-error');
+    const btn   = document.getElementById('submit-btn');
+    errEl.textContent = '';
+
+    const login    = document.getElementById('login').value.trim();
+    const password = document.getElementById('password').value;
+
+    if (!login || !password) {
+      errEl.textContent = 'Please fill in all fields.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Logging in…';
+
+    try {
+      const data = await API.post('/auth/login', { login, password });
+      Auth.save(data.token, data.userId, data.username);
+      showToast('Welcome back, ' + data.username + '!', 'success', 1500);
+      setTimeout(function() { window.location.href = '/'; }, 1000);
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false;
+      btn.textContent = 'Log in';
+    }
+  });
+</script>
+</body>
+</html>

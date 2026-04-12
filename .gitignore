@@ -1,0 +1,9 @@
+# Node dependencies — install with npm install
+node_modules/
+
+# Environment variables — contains DB password, never push
+.env
+
+# OS files
+.DS_Store
+Thumbs.db

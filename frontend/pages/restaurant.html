@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restaurant — Manipal Eats</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%;
+      max-width: 500px;
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+  </style>
+</head>
+<body>
+
+<header class="navbar">
+  <a href="/" class="brand">Manipal Eats</a>
+  <nav id="main-nav"></nav>
+</header>
+
+<div id="page-content">
+  <div class="loading-center" style="margin-top:5rem"><div class="spinner"></div></div>
+</div>
+
+<!-- Edit Review Modal -->
+<div id="edit-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h3 style="margin-bottom:1.25rem;font-size:1.1rem;font-weight:700">Edit your review</h3>
+    <div class="form-group">
+      <label>Rating: <strong id="edit-rating-display" style="color:var(--primary)">3.0</strong></label>
+      <div class="rating-input-wrap">
+        <input type="range" id="edit-rating" min="1" max="5" step="0.1" value="3" />
+        <span class="rating-display" id="edit-rating-val">3.0</span>
+      </div>
+      <div id="edit-stars-preview" style="margin-top:.3rem"></div>
+    </div>
+    <div class="form-group">
+      <label for="edit-title">Title</label>
+      <input type="text" id="edit-title" placeholder="Review title" maxlength="200" />
+    </div>
+    <div class="form-group">
+      <label for="edit-body">Review</label>
+      <textarea id="edit-body" placeholder="Share your experience..." rows="4"></textarea>
+    </div>
+    <div id="edit-error" class="form-error" style="margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:.5rem">
+      <button class="btn btn-outline" id="cancel-edit-btn">Cancel</button>
+      <button class="btn btn-primary" id="save-edit-btn">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/utils.js"></script>
+<script>
+buildNavbar();
+
+var params       = new URLSearchParams(location.search);
+var restaurantId = parseInt(params.get('id'));
+if (!restaurantId) window.location.href = '/';
+
+var restaurant      = null;
+var reviews         = [];
+var editingReviewId = null;
+
+/* ── Wire modal buttons once DOM is ready ── */
+document.getElementById('edit-rating').addEventListener('input', function() {
+  var v = parseFloat(this.value).toFixed(1);
+  document.getElementById('edit-rating-val').textContent     = v;
+  document.getElementById('edit-rating-display').textContent = v;
+  document.getElementById('edit-stars-preview').innerHTML    = renderStars(parseFloat(this.value));
+});
+document.getElementById('cancel-edit-btn').addEventListener('click', closeEditModal);
+document.getElementById('save-edit-btn').addEventListener('click', submitEdit);
+document.getElementById('edit-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditModal();
+});
+
+/* ── Load page ── */
+async function loadPage() {
+  try {
+    restaurant = await API.get('/restaurants/' + restaurantId);
+    reviews    = await API.get('/reviews/restaurant/' + restaurantId);
+    render();
+  } catch (err) {
+    document.getElementById('page-content').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">⚠️</div><p>' + esc(err.message) + '</p>' +
+      '<br><a href="/" class="btn btn-primary" style="margin-top:.5rem">Back to home</a></div>';
+  }
+}
+
+function render() {
+  var cuisineNames = (restaurant.cuisines || []).map(function(c) { return c.cuisine_name; }).join(', ');
+  var avg          = parseFloat(restaurant.avg_rating) || 0;
+  var loggedIn     = Auth.isLoggedIn();
+  var userReview   = loggedIn
+    ? reviews.find(function(r) { return parseInt(r.user_id) === Auth.userId(); })
+    : null;
+
+  document.title = restaurant.name + ' — Manipal Eats';
+
+  document.getElementById('page-content').innerHTML =
+    '<div class="detail-layout">' +
+
+      /* Header */
+      '<div class="card detail-header">' +
+        '<h1>' + esc(restaurant.name) + '</h1>' +
+        '<div class="detail-sub">' +
+          '<span class="rating-badge"><span class="star-icon">★</span><strong>' + avg.toFixed(1) + '</strong></span>' +
+          renderStars(avg) +
+          (cuisineNames ? '<span>' + esc(cuisineNames) + '</span>' : '') +
+          (restaurant.price_range ? '<span>' + esc(restaurant.price_range) + '</span>' : '') +
+          (restaurant.area_name   ? '<span>📍 ' + esc(restaurant.area_name) + '</span>' : '') +
+          '<span style="color:var(--muted);font-size:.82rem">(' + reviews.length + ' review' + (reviews.length !== 1 ? 's' : '') + ')</span>' +
+        '</div>' +
+        (restaurant.description
+          ? '<p style="margin-top:.75rem;color:var(--muted);font-size:.9rem;line-height:1.6">' + esc(restaurant.description) + '</p>'
+          : '') +
+      '</div>' +
+
+      /* Menu */
+      '<div class="card" style="padding:1.5rem">' +
+        '<div class="section-title">Menu</div>' +
+        '<div id="menu-container"><div class="loading-center"><div class="spinner"></div></div></div>' +
+      '</div>' +
+
+      /* Reviews */
+      '<div class="card" style="padding:1.5rem">' +
+        '<div class="section-title">Reviews (' + reviews.length + ')</div>' +
+        (!loggedIn
+          ? '<div style="padding:.75rem 1rem;background:var(--bg);border-radius:8px;margin-bottom:1rem;font-size:.88rem;border:1px solid var(--border)">' +
+              '<a href="/login" style="color:var(--primary);font-weight:600">Log in</a> to write a review' +
+            '</div>'
+          : '') +
+        (loggedIn && !userReview ? renderAddForm() : '') +
+        (loggedIn && userReview
+          ? '<div style="padding:.6rem .9rem;background:#fef3c7;border-radius:8px;margin-bottom:1rem;font-size:.85rem;color:#92400e;border:1px solid #fde68a">' +
+              'You have already reviewed this restaurant. Edit or delete your review below.' +
+            '</div>'
+          : '') +
+        '<div id="reviews-list">' + renderReviewsList() + '</div>' +
+      '</div>' +
+
+    '</div>';
+
+  loadMenu();
+  wireReviewButtons();
+}
+
+/* ── Add Review Form ── */
+function renderAddForm() {
+  return '<div id="add-review-wrap" style="margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border)">' +
+    '<div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">Write a review</div>' +
+    '<div class="form-group">' +
+      '<label>Rating: <strong id="new-rating-label" style="color:var(--primary)">3.0</strong></label>' +
+      '<div class="rating-input-wrap">' +
+        '<input type="range" id="new-rating" min="1" max="5" step="0.1" value="3.0" />' +
+        '<span class="rating-display" id="new-rating-val">3.0</span>' +
+      '</div>' +
+      '<div id="new-stars-preview">' + renderStars(3) + '</div>' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label for="new-title">Title</label>' +
+      '<input type="text" id="new-title" placeholder="Sum up your experience" maxlength="200" />' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label for="new-body">Review</label>' +
+      '<textarea id="new-body" placeholder="Tell others what you thought..." rows="3"></textarea>' +
+    '</div>' +
+    '<div id="add-error" class="form-error" style="margin-bottom:.5rem"></div>' +
+    '<button class="btn btn-primary" id="add-submit-btn">Submit review</button>' +
+  '</div>';
+}
+
+/* ── Wire add-form events after render ── */
+function wireReviewButtons() {
+  var newRating = document.getElementById('new-rating');
+  if (newRating) {
+    newRating.addEventListener('input', function() {
+      var v = parseFloat(this.value).toFixed(1);
+      document.getElementById('new-rating-val').textContent   = v;
+      document.getElementById('new-rating-label').textContent = v;
+      document.getElementById('new-stars-preview').innerHTML  = renderStars(parseFloat(this.value));
+    });
+  }
+  var addBtn = document.getElementById('add-submit-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', submitReview);
+  }
+}
+
+/* ── Reviews list HTML ── */
+function renderReviewsList() {
+  if (!reviews.length) {
+    return '<div class="empty-state"><div class="empty-icon">💬</div><p>No reviews yet. Be the first!</p></div>';
+  }
+  return reviews.map(function(r) {
+    var isOwner  = Auth.isLoggedIn() && parseInt(r.user_id) === Auth.userId();
+    var rVal     = parseFloat(r.rating);
+    return '<div class="review-card" id="review-' + r.review_id + '">' +
+      '<div class="review-header">' +
+        '<div>' +
+          '<span class="reviewer-name">' + esc(r.full_name || r.username) + '</span>' +
+          '<span class="review-date" style="margin-left:.5rem">' + formatDate(r.created_at) + '</span>' +
+        '</div>' +
+        '<div class="rating-badge"><span class="star-icon">★</span> ' + rVal.toFixed(1) + '</div>' +
+      '</div>' +
+      '<div style="margin:.3rem 0">' + renderStars(rVal) + '</div>' +
+      (r.title ? '<div class="review-title">' + esc(r.title) + '</div>' : '') +
+      (r.body  ? '<div class="review-body" style="margin-top:.25rem">' + esc(r.body)  + '</div>' : '') +
+      (isOwner
+        ? '<div class="review-actions">' +
+            '<button class="btn btn-outline btn-sm" ' +
+              'data-review-id="' + r.review_id + '" ' +
+              'data-rating="'    + rVal         + '" ' +
+              'data-title="'     + escAttr(r.title || '') + '" ' +
+              'data-body="'      + escAttr(r.body  || '') + '" ' +
+              'onclick="handleEditClick(this)">Edit</button>' +
+            '<button class="btn btn-danger btn-sm" ' +
+              'data-review-id="' + r.review_id + '" ' +
+              'onclick="handleDeleteClick(this)">Delete</button>' +
+          '</div>'
+        : '') +
+    '</div>';
+  }).join('');
+}
+
+/* ── Edit handlers using data attributes (no inline JSON) ── */
+function handleEditClick(btn) {
+  var reviewId = parseInt(btn.getAttribute('data-review-id'));
+  var rating   = parseFloat(btn.getAttribute('data-rating'));
+  var title    = btn.getAttribute('data-title');
+  var body     = btn.getAttribute('data-body');
+  openEditModal(reviewId, rating, title, body);
+}
+
+function handleDeleteClick(btn) {
+  var reviewId = parseInt(btn.getAttribute('data-review-id'));
+  deleteReview(reviewId);
+}
+
+/* ── Menu loader ── */
+async function loadMenu() {
+  var el = document.getElementById('menu-container');
+  if (!el) return;
+  try {
+    var menu = await API.get('/restaurants/' + restaurantId + '/menu');
+    if (!menu.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:.9rem">Menu not available.</p>';
+      return;
+    }
+    el.innerHTML = menu.map(function(cat) {
+      if (!cat.items.length) return '';
+      return '<div class="menu-category">' +
+        '<h3>' + esc(cat.category_name) + '</h3>' +
+        cat.items.map(function(item) {
+          return '<div class="menu-item">' +
+            '<div>' +
+              '<span class="veg-dot ' + (item.is_vegetarian ? 'veg' : 'non') + '"></span>' +
+              '<span class="item-name">' + esc(item.item_name) + '</span>' +
+              (item.spice_level && item.spice_level !== 'None'
+                ? '<span style="font-size:.72rem;color:var(--muted);margin-left:.35rem">(' + esc(item.spice_level) + ')</span>' : '') +
+              (item.description ? '<div class="item-desc">' + esc(item.description) + '</div>' : '') +
+            '</div>' +
+            '<div class="item-price">₹' + parseFloat(item.price).toFixed(0) + '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }).join('');
+  } catch (err) {
+    if (el) el.innerHTML = '<p style="color:var(--muted)">Could not load menu.</p>';
+  }
+}
+
+/* ── Submit new review ── */
+async function submitReview() {
+  var errEl = document.getElementById('add-error');
+  var btn   = document.getElementById('add-submit-btn');
+  if (!errEl || !btn) return;
+  errEl.textContent = '';
+
+  var rating = parseFloat(document.getElementById('new-rating').value);
+  var title  = document.getElementById('new-title').value.trim();
+  var body   = document.getElementById('new-body').value.trim();
+
+  btn.disabled    = true;
+  btn.textContent = 'Submitting…';
+
+  try {
+    var data = await API.post('/reviews', {
+      restaurant_id: restaurantId,
+      rating: rating,
+      title: title || null,
+      body:  body  || null
+    });
+    restaurant.avg_rating = data.avg_rating;
+    showToast('Review submitted!', 'success');
+    reviews = await API.get('/reviews/restaurant/' + restaurantId);
+    render();
+  } catch (err) {
+    errEl.textContent   = err.message;
+    btn.disabled        = false;
+    btn.textContent     = 'Submit review';
+  }
+}
+
+/* ── Edit modal ── */
+function openEditModal(reviewId, rating, title, body) {
+  editingReviewId = reviewId;
+  var r = parseFloat(rating);
+  var slider = document.getElementById('edit-rating');
+  slider.value = r;
+  var v = r.toFixed(1);
+  document.getElementById('edit-rating-val').textContent     = v;
+  document.getElementById('edit-rating-display').textContent = v;
+  document.getElementById('edit-stars-preview').innerHTML    = renderStars(r);
+  document.getElementById('edit-title').value = title || '';
+  document.getElementById('edit-body').value  = body  || '';
+  document.getElementById('edit-error').textContent = '';
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('open');
+  editingReviewId = null;
+  /* Reset button so it works every time */
+  var btn = document.getElementById('save-edit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+  var errEl = document.getElementById('edit-error');
+  if (errEl) errEl.textContent = '';
+}
+
+async function submitEdit() {
+  var errEl = document.getElementById('edit-error');
+  var btn   = document.getElementById('save-edit-btn');
+  errEl.textContent = '';
+  btn.disabled    = true;
+  btn.textContent = 'Saving…';
+
+  var rating = parseFloat(document.getElementById('edit-rating').value);
+  var title  = document.getElementById('edit-title').value.trim();
+  var body   = document.getElementById('edit-body').value.trim();
+
+  try {
+    var data = await API.put('/reviews/' + editingReviewId, {
+      rating: rating,
+      title:  title || null,
+      body:   body  || null
+    });
+    restaurant.avg_rating = data.avg_rating;
+    showToast('Review updated!', 'success');
+    btn.disabled = false;
+    btn.textContent = 'Save changes';
+    closeEditModal();
+    reviews = await API.get('/reviews/restaurant/' + restaurantId);
+    render();
+  } catch (err) {
+    errEl.textContent   = err.message;
+    btn.disabled        = false;
+    btn.textContent     = 'Save changes';
+  }
+}
+
+/* ── Delete review ── */
+async function deleteReview(reviewId) {
+  if (!confirm('Delete your review?')) return;
+  try {
+    var data = await API.del('/reviews/' + reviewId);
+    restaurant.avg_rating = data.avg_rating;
+    showToast('Review deleted', 'success');
+    reviews = await API.get('/reviews/restaurant/' + restaurantId);
+    render();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ── Helpers ── */
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function formatDate(ts) {
+  return new Date(ts).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+}
+
+loadPage();
+</script>
+</body>
+</html>

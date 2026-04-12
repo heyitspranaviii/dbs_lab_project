@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manipal Eats</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+
+<header class="navbar">
+  <a href="/" class="brand">Manipal Eats</a>
+  <nav id="main-nav"></nav>
+</header>
+
+<div class="filters-bar">
+  <input type="text" id="search" placeholder="Search restaurants..." oninput="debounceSearch()" />
+  <select id="filter-cuisine" onchange="applyFilters()">
+    <option value="">All Cuisines</option>
+  </select>
+  <select id="filter-price" onchange="applyFilters()">
+    <option value="">All Prices</option>
+    <option value="Rs (0-450)">Budget (0-450)</option>
+    <option value="Rs (450-800)">Mid (450-800)</option>
+    <option value="Rs (800+)">Premium (800+)</option>
+  </select>
+  <select id="filter-rating" onchange="applyFilters()">
+    <option value="">Any Rating</option>
+    <option value="4.5">4.5+</option>
+    <option value="4.0">4.0+</option>
+    <option value="3.5">3.5+</option>
+  </select>
+  <select id="cuisine-breakdown-select" title="Cuisines in Manipal">
+    <option value="" disabled selected>◈ Cuisines in Manipal</option>
+  </select>
+</div>
+
+<div class="restaurants-layout">
+
+  <div class="restaurant-list" id="restaurant-list-panel">
+
+    <!-- Recommended for You -->
+    <div id="recommendations-section" style="display:none">
+      <div class="section-label">
+        <span class="section-label-icon">✦</span>
+        Recommended for You
+        <span class="section-label-sub" id="rec-basis"></span>
+      </div>
+      <div id="rec-list"></div>
+      <div class="section-divider"></div>
+    </div>
+
+    <!-- All Restaurants -->
+    <div class="section-label">
+      <span class="section-label-icon">⊞</span> All Restaurants
+    </div>
+    <div id="restaurant-list">
+      <div class="loading-center"><div class="spinner"></div></div>
+    </div>
+
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/utils.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+if (!Auth.isLoggedIn()) window.location.href = '/login';
+buildNavbar('home');
+
+var MANIPAL = [13.3524, 74.7904];
+var map, markers = [], activeCardId = null;
+
+/* ── Init map ── */
+map = L.map('map', { center: MANIPAL, zoom: 15 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+/* ── Load filter cuisines ── */
+async function loadCuisines() {
+  try {
+    var cuisines = await API.get('/restaurants/meta/cuisines');
+    var sel = document.getElementById('filter-cuisine');
+    cuisines.forEach(function(c) {
+      var opt = document.createElement('option');
+      opt.value = c.cuisine_id;
+      opt.textContent = c.cuisine_name;
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.error(e); }
+}
+
+/* ── Load cuisine breakdown into select ── */
+async function loadCuisineBreakdown() {
+  try {
+    var data = await API.get('/restaurants/meta/cuisine-breakdown');
+    var sel  = document.getElementById('cuisine-breakdown-select');
+    if (!data || !data.length) return;
+    data.forEach(function(row) {
+      var opt = document.createElement('option');
+      opt.disabled = true;
+      opt.textContent = row.cuisine_name + ' — ' + row.restaurant_count +
+        ' restaurant' + (row.restaurant_count > 1 ? 's' : '') +
+        '  (' + parseFloat(row.avg_rating).toFixed(2) + ' ★)';
+      /* Tooltip explains primary+secondary count */
+      opt.title = row.cuisine_name + ': ' + row.restaurant_count + ' restaurant(s) serving this cuisine (primary + secondary)';
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.error('Breakdown error:', e); }
+}
+
+/* ── Recommendations ── */
+async function loadRecommendations() {
+  try {
+    var recs = await API.get('/restaurants/recommendations/foryou');
+    var section = document.getElementById('recommendations-section');
+    var list    = document.getElementById('rec-list');
+    var basis   = document.getElementById('rec-basis');
+
+    if (!recs || !recs.length) {
+      list.innerHTML =
+        '<div style="padding:.6rem .75rem;font-size:.82rem;color:var(--muted);' +
+        'background:var(--bg);border-radius:8px;border:1px solid var(--border)">' +
+        'Review more restaurants to unlock personalised recommendations.' +
+        '</div>';
+      basis.textContent = '';
+      section.style.display = 'block';
+      return;
+    }
+
+    var cuisines = [];
+    recs.forEach(function(r) {
+      if (r.cuisine_name && cuisines.indexOf(r.cuisine_name) === -1)
+        cuisines.push(r.cuisine_name);
+    });
+    basis.textContent = 'based on your love of ' + cuisines.slice(0,2).join(' & ');
+
+    list.innerHTML = recs.map(function(r) {
+      var avg = parseFloat(r.avg_rating) || 0;
+      return '<div class="restaurant-card rec-card" onclick="openRestaurant(' + r.restaurant_id + ')">' +
+        '<div class="rest-info">' +
+          '<h3>' + escHtml(r.name) + '</h3>' +
+          '<div class="rest-meta">' + escHtml(r.cuisine_name || '') +
+            (r.price_range ? ' · ' + escHtml(r.price_range) : '') + '</div>' +
+          '<div style="margin-top:.3rem">' +
+            '<span class="match-pill">✓ ' + r.match_score + ' cuisine match' + (r.match_score > 1 ? 'es' : '') + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="rest-rating">' +
+          renderStars(avg) +
+          '<div style="font-weight:800;font-size:1rem;color:#e85d26;margin-top:2px">' + avg.toFixed(2) + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    section.style.display = 'block';
+  } catch(e) {
+    document.getElementById('recommendations-section').style.display = 'none';
+  }
+}
+
+/* ── Restaurant list ── */
+async function loadRestaurants(params) {
+  params = params || {};
+  var listEl = document.getElementById('restaurant-list');
+  listEl.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  var qs = new URLSearchParams(params).toString();
+  try {
+    var restaurants = await API.get('/restaurants' + (qs ? '?' + qs : ''));
+    renderList(restaurants);
+    renderMarkers(restaurants);
+  } catch(err) {
+    listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><p>' + err.message + '</p></div>';
+  }
+}
+
+function renderList(list) {
+  var el = document.getElementById('restaurant-list');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🍽️</div><p>No restaurants found</p></div>';
+    return;
+  }
+  el.innerHTML = list.map(function(r) {
+    var avg = parseFloat(r.avg_rating) || 0;
+    return '<div class="restaurant-card ' + (activeCardId === r.restaurant_id ? 'active' : '') + '" ' +
+      'id="card-' + r.restaurant_id + '" onclick="openRestaurant(' + r.restaurant_id + ')">' +
+      '<div class="rest-info">' +
+        '<h3>' + escHtml(r.name) + '</h3>' +
+        '<div class="rest-meta">' + escHtml(r.area_name || 'Manipal') + ' · ' +
+          r.review_count + ' review' + (r.review_count != 1 ? 's' : '') + '</div>' +
+        '<div class="rest-tags">' +
+          (r.all_cuisines
+            ? r.all_cuisines.split(', ').map(function(c) {
+                return '<span class="tag tag-cuisine">' + escHtml(c) + '</span>';
+              }).join('')
+            : '') +
+          (r.price_range ? '<span class="tag tag-price">' + escHtml(r.price_range) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="rest-rating">' +
+        renderStars(avg) +
+        '<div style="font-weight:800;font-size:1rem;color:#e85d26;margin-top:2px">' + avg.toFixed(2) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderMarkers(list) {
+  markers.forEach(function(m) { map.removeLayer(m); });
+  markers = [];
+  list.forEach(function(r) {
+    var avg  = parseFloat(r.avg_rating) || 0;
+    var icon = L.divIcon({
+      className: '',
+      html: '<div style="background:#e85d26;color:#fff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3)">' + escHtml(r.name) + '</div>',
+      iconAnchor: [0, 0]
+    });
+    var m = L.marker([parseFloat(r.latitude), parseFloat(r.longitude)], { icon: icon })
+      .bindPopup(
+        '<div style="min-width:160px"><strong>' + escHtml(r.name) + '</strong><br>' +
+        '<span style="color:#f59e0b">★</span> ' + avg.toFixed(2) +
+        (r.primary_cuisine ? ' · ' + escHtml(r.primary_cuisine) : '') +
+        '<br><small>' + escHtml(r.area_name || '') + '</small>' +
+        '<br><a href="/restaurant?id=' + r.restaurant_id + '" style="color:#e85d26;font-weight:600;font-size:.82rem">View details →</a></div>'
+      ).addTo(map);
+    m.on('click', function() {
+      activeCardId = r.restaurant_id;
+      document.querySelectorAll('.restaurant-card').forEach(function(c) { c.classList.remove('active'); });
+      var card = document.getElementById('card-' + r.restaurant_id);
+      if (card) { card.classList.add('active'); card.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+    });
+    markers.push(m);
+  });
+  if (list.length) {
+    var bounds = L.latLngBounds(list.map(function(r) { return [parseFloat(r.latitude), parseFloat(r.longitude)]; }));
+    map.fitBounds(bounds, { padding:[50,50] });
+  }
+}
+
+function openRestaurant(id) { window.location.href = '/restaurant?id=' + id; }
+
+var debounceTimer;
+function debounceSearch() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(applyFilters, 350);
+}
+function applyFilters() {
+  var params  = {};
+  var search  = document.getElementById('search').value.trim();
+  var cuisine = document.getElementById('filter-cuisine').value;
+  var price   = document.getElementById('filter-price').value;
+  var rating  = document.getElementById('filter-rating').value;
+  if (search)  params.search     = search;
+  if (cuisine) params.cuisine    = cuisine;
+  if (price)   params.price      = price;
+  if (rating)  params.min_rating = rating;
+  loadRestaurants(params);
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── Boot ── */
+loadCuisines();
+loadRestaurants();
+loadRecommendations();
+loadCuisineBreakdown();
+</script>
+</body>
+</html>

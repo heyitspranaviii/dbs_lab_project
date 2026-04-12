@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign Up — Manipal Eats</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="auth-page">
+
+<div class="auth-box" style="max-width:460px">
+  <a href="/" class="auth-brand">Manipal Eats</a>
+  <h1>Create account</h1>
+  <p class="auth-sub">Join the Manipal food community</p>
+
+  <form id="signup-form" novalidate>
+    <div class="form-group">
+      <label for="full_name">Full Name</label>
+      <input type="text" id="full_name" placeholder="Your full name" autocomplete="name" />
+    </div>
+    <div class="form-group">
+      <label for="username">Username <span style="color:#dc2626">*</span></label>
+      <input type="text" id="username" placeholder="e.g. rahul_mit" autocomplete="username" />
+    </div>
+    <div class="form-group">
+      <label for="email">Email <span style="color:#dc2626">*</span></label>
+      <input type="email" id="email" placeholder="e.g. you@learner.manipal.edu" autocomplete="email" />
+    </div>
+    <div class="form-group">
+      <label for="password">Password <span style="color:#dc2626">*</span></label>
+      <input type="password" id="password" placeholder="Min. 6 characters" autocomplete="new-password" />
+    </div>
+
+    <div style="font-size:.85rem;font-weight:600;color:var(--muted);margin-bottom:.5rem;padding-top:.25rem;border-top:1px solid var(--border)">
+      Security Question <span style="font-weight:400">(for password recovery)</span>
+    </div>
+    <div class="form-group">
+      <label for="security_question">Question</label>
+      <select id="security_question">
+        <option value="">— Select a question —</option>
+        <option>What is your pet name?</option>
+        <option>What is your hometown?</option>
+        <option>What is your favourite colour?</option>
+        <option>What is your favourite movie?</option>
+        <option>What is your mother tongue?</option>
+        <option>What is your best friend's name?</option>
+        <option>What was the name of your school?</option>
+        <option>What is your favourite music band?</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="security_answer">Answer</label>
+      <input type="text" id="security_answer" placeholder="Your answer (case-insensitive)" />
+    </div>
+
+    <div id="form-error" class="form-error" style="margin-bottom:.75rem"></div>
+    <button type="submit" class="btn btn-primary" style="width:100%" id="submit-btn">Create account</button>
+  </form>
+
+  <div class="auth-footer">
+    Already have an account? <a href="/login">Log in</a>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/utils.js"></script>
+<script>
+  if (Auth.isLoggedIn()) window.location.href = '/';
+
+  document.getElementById('signup-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const errEl = document.getElementById('form-error');
+    const btn   = document.getElementById('submit-btn');
+    errEl.textContent = '';
+
+    var username          = document.getElementById('username').value.trim();
+    var email             = document.getElementById('email').value.trim();
+    var password          = document.getElementById('password').value;
+    var full_name         = document.getElementById('full_name').value.trim();
+    var security_question = document.getElementById('security_question').value;
+    var security_answer   = document.getElementById('security_answer').value.trim();
+
+    if (!username || !email || !password) {
+      errEl.textContent = 'Username, email and password are required.';
+      return;
+    }
+    if (password.length < 6) {
+      errEl.textContent = 'Password must be at least 6 characters.';
+      return;
+    }
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      errEl.textContent = 'Please enter a valid email address.';
+      return;
+    }
+    if (username.length < 3) {
+      errEl.textContent = 'Username must be at least 3 characters.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Creating account…';
+
+    try {
+      var data = await API.post('/auth/signup', {
+        username: username,
+        email: email,
+        password: password,
+        full_name: full_name || username,
+        security_question: security_question || null,
+        security_answer: security_answer || null
+      });
+      Auth.save(data.token, data.userId, data.username);
+      showToast('Welcome to Manipal Eats, ' + data.username + '!', 'success', 1500);
+      setTimeout(function() { window.location.href = '/'; }, 1000);
+    } catch (err) {
+      errEl.textContent = err.message;
+      btn.disabled = false;
+      btn.textContent = 'Create account';
+    }
+  });
+</script>
+</body>
+</html>

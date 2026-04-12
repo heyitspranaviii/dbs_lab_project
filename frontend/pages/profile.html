@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Profile — Manipal Eats</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<header class="navbar">
+  <a href="/" class="brand">Manipal Eats</a>
+  <nav id="main-nav"></nav>
+</header>
+
+<div class="profile-wrap">
+
+  <div class="card profile-card" style="margin-bottom:1.5rem" id="profile-section">
+    <div class="loading-center"><div class="spinner"></div></div>
+  </div>
+
+  <div class="card" style="padding:1.5rem">
+    <div class="section-title" id="reviews-heading">My Reviews</div>
+    <div id="my-reviews">
+      <div class="loading-center"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Edit Profile Modal -->
+<div id="edit-profile-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;padding:1rem">
+  <div class="card" style="width:100%;max-width:420px;padding:1.5rem">
+    <h3 style="margin-bottom:1.25rem;font-size:1.1rem">Edit Profile</h3>
+    <div class="form-group">
+      <label for="ep-full_name">Full Name</label>
+      <input type="text" id="ep-full_name" />
+    </div>
+    <div class="form-group">
+      <label for="ep-phone">Phone</label>
+      <input type="text" id="ep-phone" placeholder="e.g. 9876543210" />
+    </div>
+    <div class="form-group">
+      <label for="ep-gender">Gender</label>
+      <select id="ep-gender">
+        <option value="">Prefer not to say</option>
+        <option value="Male">Male</option>
+        <option value="Female">Female</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+    <div id="ep-error" class="form-error" style="margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.75rem;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeEditProfile()">Cancel</button>
+      <button class="btn btn-primary" id="ep-save-btn" onclick="saveProfile()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/js/utils.js"></script>
+<script>
+  buildNavbar('profile');
+
+  /* Auth guard */
+  if (!Auth.isLoggedIn()) { window.location.href = '/login'; }
+
+  var profileData = null;
+
+  /* ── Load profile ── */
+  async function loadProfile() {
+    try {
+      profileData = await API.get('/users/me');
+      renderProfile();
+    } catch (err) {
+      document.getElementById('profile-section').innerHTML =
+        '<div class="empty-state"><p style="color:#dc2626">' + esc(err.message) + '</p></div>';
+    }
+  }
+
+  function renderProfile() {
+    var p       = profileData;
+    var initial = ((p.full_name || p.username || '?')[0]).toUpperCase();
+    var joined  = new Date(p.created_at).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+    document.getElementById('profile-section').innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:1.25rem;flex-wrap:wrap">' +
+        '<div class="profile-avatar">' + initial + '</div>' +
+        '<div style="flex:1;min-width:200px">' +
+          '<div style="font-size:1.3rem;font-weight:800;line-height:1.2">' + esc(p.full_name || p.username) + '</div>' +
+          '<div style="color:var(--muted);font-size:.88rem;margin-top:.2rem">@' + esc(p.username) + '</div>' +
+          '<div style="color:var(--muted);font-size:.85rem">' + esc(p.email) + '</div>' +
+          (p.gender && p.gender !== 'Prefer not to say' ? '<div style="color:var(--muted);font-size:.85rem">' + esc(p.gender) + '</div>' : '') +
+          (p.phone ? '<div style="color:var(--muted);font-size:.85rem">📞 ' + esc(p.phone) + '</div>' : '') +
+          '<div class="profile-stats">' +
+            '<div class="stat-item"><div class="stat-val">' + p.total_reviews + '</div><div class="stat-label">Reviews</div></div>' +
+            '<div class="stat-item"><div class="stat-val" style="font-size:1rem">' + joined + '</div><div class="stat-label">Member since</div></div>' +
+          '</div>' +
+          '<button class="btn btn-outline btn-sm" onclick="openEditProfile()">Edit Profile</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  /* ── Load my reviews ── */
+  async function loadMyReviews() {
+    var el = document.getElementById('my-reviews');
+    try {
+      var reviews = await API.get('/users/me/reviews');
+      document.getElementById('reviews-heading').textContent = 'My Reviews (' + reviews.length + ')';
+
+      if (!reviews.length) {
+        el.innerHTML =
+          '<div class="empty-state">' +
+            '<div class="empty-icon">✍️</div>' +
+            '<p>You have not written any reviews yet.</p>' +
+            '<a href="/" class="btn btn-primary" style="margin-top:1rem">Explore restaurants</a>' +
+          '</div>';
+        return;
+      }
+
+      el.innerHTML = reviews.map(function(r) {
+        var ratingVal = parseFloat(r.rating);
+        return '<div class="review-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">' +
+            '<a href="/restaurant?id=' + r.restaurant_id + '" style="font-weight:700;color:var(--primary);font-size:.95rem">' +
+              esc(r.restaurant_name) +
+            '</a>' +
+            '<span class="rating-badge"><span class="star-icon">★</span> ' + ratingVal.toFixed(1) + '</span>' +
+          '</div>' +
+          '<div style="margin-bottom:.3rem">' + renderStars(ratingVal) + '</div>' +
+          (r.title ? '<div class="review-title">' + esc(r.title) + '</div>' : '') +
+          (r.body  ? '<div class="review-body" style="margin-top:.3rem">' + esc(r.body) + '</div>' : '') +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:.5rem;flex-wrap:wrap;gap:.5rem">' +
+            '<span class="review-date">' + formatDate(r.created_at) + '</span>' +
+            '<a href="/restaurant?id=' + r.restaurant_id + '" style="font-size:.8rem;color:var(--primary)">View restaurant →</a>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    } catch (err) {
+      el.innerHTML = '<p class="form-error">' + esc(err.message) + '</p>';
+    }
+  }
+
+  /* ── Edit profile modal ── */
+  function openEditProfile() {
+    document.getElementById('ep-full_name').value = profileData.full_name || '';
+    document.getElementById('ep-phone').value     = profileData.phone    || '';
+    document.getElementById('ep-gender').value    = profileData.gender   || '';
+    document.getElementById('ep-error').textContent = '';
+    document.getElementById('edit-profile-modal').style.display = 'flex';
+  }
+
+  function closeEditProfile() {
+    document.getElementById('edit-profile-modal').style.display = 'none';
+  }
+
+  document.getElementById('edit-profile-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditProfile();
+  });
+
+  async function saveProfile() {
+    var errEl    = document.getElementById('ep-error');
+    var btn      = document.getElementById('ep-save-btn');
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    var full_name = document.getElementById('ep-full_name').value.trim();
+    var phone     = document.getElementById('ep-phone').value.trim();
+    var gender    = document.getElementById('ep-gender').value;
+
+    try {
+      await API.put('/users/me', {
+        full_name: full_name || null,
+        phone:     phone     || null,
+        gender:    gender    || null
+      });
+      showToast('Profile updated!', 'success');
+      closeEditProfile();
+      profileData = await API.get('/users/me');
+      renderProfile();
+    } catch (err) {
+      errEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  }
+
+  /* ── Helpers ── */
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function formatDate(ts) {
+    return new Date(ts).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+  }
+
+  loadProfile();
+  loadMyReviews();
+</script>
+</body>
+</html>
