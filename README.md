@@ -93,7 +93,7 @@ dbs_lab_project/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/pranaviii29/dbs_lab_project.git
+git clone https://github.com/heyitspranaviii/dbs_lab_project.git
 cd dbs_lab_project
 ```
 
