@@ -93,7 +93,7 @@ dbs_lab_project/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/heyitspranaviii/dbs_lab_project.git
+git clone https://github.com/heyitspranaviii/manipal-eats.git
 cd dbs_lab_project
 ```
 
@@ -109,7 +109,7 @@ source C:/path/to/full_dump1.sql
 
 ```sql
 use restaurant_db;
-source C:/path/to/dbs_lab_project/sql/setup.sql
+source C:/path/to/manipal-eats/sql/setup.sql
 ```
 
 ### 4. Create the .env file
